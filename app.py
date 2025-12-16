@@ -1,34 +1,37 @@
 import streamlit as st
-from google.cloud import aiplatform
+import vertexai
+from vertexai.preview.vision_models import ImageGenerationModel
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from PIL import Image
 from io import BytesIO
 import json
 import os
 
-# --- 1. SETUP ---
-st.set_page_config(page_title="BrandScout: All-Google Edition", page_icon="🍌", layout="wide")
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="BrandScout", page_icon="🍌", layout="wide")
 
-# Styling
+# Custom CSS
 st.markdown("""
 <style>
     .stApp { background-color: #0E1117; color: #FAFAFA; }
-    .stButton>button { background-color: #4285F4; color: white; border: none; border-radius: 6px; }
+    .stButton>button { background-color: #4285F4; color: white; border-radius: 6px; }
 </style>
 """, unsafe_allow_html=True)
 
-# Authenticate Vertex AI (Image Generator)
-# UPDATED: Now looking for 'GOOGLE_KEY' to match your settings
-if "GOOGLE_KEY" in st.secrets:
+# --- 2. AUTHENTICATION ---
+if "GOOGLE_JSON" in st.secrets:
     try:
-        key_info = json.loads(st.secrets["GOOGLE_KEY"])
-        from google.oauth2 import service_account
+        # Load the JSON string
+        key_info = json.loads(st.secrets["GOOGLE_JSON"])
         creds = service_account.Credentials.from_service_account_info(key_info)
-        aiplatform.init(project=key_info["project_id"], location="us-central1", credentials=creds)
+        
+        # Initialize Vertex AI with the new method
+        vertexai.init(project=key_info["project_id"], location="us-central1", credentials=creds)
     except Exception as e:
-        st.error(f"Vertex AI Auth Error: {e}")
+        st.error(f"Google Auth Error: {e}")
 
-# --- 2. FUNCTIONS ---
+# --- 3. FUNCTIONS ---
 
 def google_scout_images(query):
     """Uses Google Custom Search to find Behance references."""
@@ -49,17 +52,22 @@ def google_scout_images(query):
 
 def generate_mockup(industry, logo_image):
     """Generates the image using Google Vertex AI (Imagen 3)."""
-    from google.cloud.aiplatform.gapic.schema import predict
-    model = aiplatform.ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
-    
-    prompt = f"""
-    Award-winning product photography of {industry}.
-    The product features a logo centered on the packaging.
-    Cinematic lighting, 8k resolution, highly detailed, photorealistic.
-    """
-    
-    response = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="16:9")
-    return response[0]._pil_image
+    try:
+        # UPDATED: Using the correct class for Imagen 3
+        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
+        
+        prompt = f"""
+        Award-winning product photography of {industry}.
+        The product features a logo centered on the packaging.
+        Cinematic lighting, 8k resolution, highly detailed, photorealistic.
+        """
+        
+        # Generate
+        response = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="16:9")
+        return response[0]._pil_image
+    except Exception as e:
+        st.error(f"Generation Error: {e}")
+        return None
 
 def composite_logo(background, logo):
     """Stamps the logo on top as a fallback."""
@@ -78,7 +86,7 @@ def composite_logo(background, logo):
     bg.paste(logo, (x, y), logo)
     return bg
 
-# --- 3. UI ---
+# --- 4. UI ---
 st.sidebar.title("🍌 BrandScout")
 st.sidebar.info("Powered by Google Vertex + Search")
 
@@ -103,9 +111,10 @@ if go_btn and logo_file:
         status.write("🎨 Generating 4K Mockup...")
         bg = generate_mockup(industry, user_logo)
         
-        # 3. BUILD
-        status.write("🔨 Branding...")
-        final = composite_logo(bg, user_logo)
-        
-        status.update(label="Done!", state="complete", expanded=False)
-        st.image(final, caption="Final Design", use_column_width=True)
+        if bg:
+            # 3. BUILD
+            status.write("🔨 Branding...")
+            final = composite_logo(bg, user_logo)
+            
+            status.update(label="Done!", state="complete", expanded=False)
+            st.image(final, caption="Final Design", use_column_width=True)
